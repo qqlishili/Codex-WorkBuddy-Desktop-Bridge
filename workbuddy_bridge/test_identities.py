@@ -45,18 +45,17 @@ class IdentityTests(unittest.TestCase):
             workbuddy_start("task", identity="reviewer"),
             {
                 "ok": False,
-                "错误码": "invalid_argument",
+                "错误码": "无效参数",
                 "error": "参数无效: identity 必须是以下之一: online-search, S1, S2, S3, env-intel, docs-reviewer",
             },
         )
 
     def test_start_rejects_docs_reviewer_without_review_target(self) -> None:
+        result = workbuddy_start("task", identity="docs-reviewer")
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["错误码"], "缺少审查目标")
         self.assertEqual(
-            workbuddy_start("task", identity="docs-reviewer"),
-            {
-                "ok": False,
-                "错误码": "缺少审查目标（caller 未传入 review_target）",
-            },
+            result["error"], "缺少审查目标（caller 未传入 review_target）"
         )
 
 

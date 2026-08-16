@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
+import traceback
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -18,8 +19,9 @@ from workbuddy_bridge.acp import (
     spawn_isolated_server,
     task_prompt,
 )
+from workbuddy_bridge.bridge_registry import register_bridge_session
 from workbuddy_bridge.errors import ERROR_KEYS, err
-from workbuddy_bridge.history import register_completed_session, wait_for_task_registration
+from workbuddy_bridge.history import wait_for_task_registration
 from workbuddy_bridge.identities import compose_identity_prompt, normalize_identity
 from workbuddy_bridge.multiplexer import SessionEventChannel
 from workbuddy_bridge.review_sessions import (
@@ -73,15 +75,20 @@ class TaskState:
     cancel_requested: bool = False
     client: AcpClient | None = None
     channel: SessionEventChannel | None = None
-    condition: threading.Condition = field(default_factory=threading.Condition)
+    # Condition 显式 RLock；workbuddy_wait 的 wait 与 _run 的 notify_all 共享此 lock。
+    condition: threading.Condition = field(
+        default_factory=lambda: threading.Condition(threading.RLock())
+    )
 
 
 TASKS: dict[str, TaskState] = {}
 TASKS_MAX_KEEP = 64  # 保留最近 N 个 terminal state task；超出部分清理
+TASK_ACTIVE_TIMEOUT_SECONDS = 3600  # active task 最长存活；超龄标记 failed 并清理
 TASKS_LOCK = threading.Lock()
 PROMPT_DISPATCH_INTERVAL_SECONDS = 1.0
-PROMPT_DISPATCH_LOCK = threading.Lock()
+PROMPT_DISPATCH_LOCK = threading.Lock()  # 只保护 new_session/load_session 的 ACP Host 串行化
 LAST_PROMPT_DISPATCH_AT = 0.0
+_DISPATCH_THROTTLE_LOCK = threading.Lock()  # 保护节流逻辑（LAST_PROMPT_DISPATCH_AT 更新），不阻塞 session 创建
 CONTINUATION_SESSION_LOCKS: dict[str, threading.Lock] = {}
 CONTINUATION_SESSION_LOCKS_LOCK = threading.Lock()
 
@@ -101,7 +108,8 @@ def _dispatch_prompt(
     event_callback: Any,
     prompt: str,
 ) -> PromptTransport:
-    """Atomically create and start one session before releasing the shared host."""
+    """Create one ACP session under PROMPT_DISPATCH_LOCK, then configure, throttle, and
+    wait for prompt start outside the lock so concurrent tasks don't block each other."""
     global LAST_PROMPT_DISPATCH_AT
     transport = PromptTransport()
 
@@ -119,6 +127,7 @@ def _dispatch_prompt(
         finally:
             transport.done.set()
 
+    # 1. 锁内：只保护 new_session/load_session（ACP Host 串行化）
     with PROMPT_DISPATCH_LOCK:
         if task.resume_session_id:
             task.session_id = client.load_session(
@@ -127,35 +136,46 @@ def _dispatch_prompt(
             )
         else:
             task.session_id = client.new_session(task.cwd)
-        task.channel = SessionEventChannel(
-            task.session_id,
-            event_callback=event_callback,
-        )
-        client.configure_session(
-            model=task.model,
-            reasoning_effort=task.reasoning_effort,
-            permission_mode="fullAccess",
-            session_id=task.session_id,
-        )
+
+    # 2. 锁外：创建 channel（session_id 已确定）
+    task.channel = SessionEventChannel(
+        task.session_id,
+        event_callback=event_callback,
+    )
+
+    # 3. 锁外：configure_session（session_id 已确定，无需串行化）
+    client.configure_session(
+        model=task.model,
+        reasoning_effort=task.reasoning_effort,
+        permission_mode="fullAccess",
+        session_id=task.session_id,
+    )
+
+    # 4. 节流：相邻 prompt 间隔 ≥1 秒（单独锁，不阻塞其他任务的 session 创建）
+    with _DISPATCH_THROTTLE_LOCK:
         now = time.monotonic()
         delay = PROMPT_DISPATCH_INTERVAL_SECONDS - (now - LAST_PROMPT_DISPATCH_AT)
         if delay > 0:
             time.sleep(delay)
         LAST_PROMPT_DISPATCH_AT = time.monotonic()
-        task.state = "running"
-        task.started_at = time.time()
-        transport.thread = threading.Thread(
-            target=send,
-            name=f"workbuddy-prompt-{task.task_id}",
-            daemon=True,
-        )
-        transport.thread.start()
-        if not task.channel.wait_for_prompt_start(15.0):
-            raise WorkBuddyError(
-                ERROR_KEYS["workbuddy_prompt_start_timeout"].format(
-                    session_id=task.session_id
-                )
+
+    # 5. 启动 prompt 发送线程
+    task.state = "running"
+    task.started_at = time.time()
+    transport.thread = threading.Thread(
+        target=send,
+        name=f"workbuddy-prompt-{task.task_id}",
+        daemon=True,
+    )
+    transport.thread.start()
+
+    # 6. 锁外：等待 prompt 启动确认（不阻塞其他任务的 session 创建）
+    if not task.channel.wait_for_prompt_start(15.0):
+        raise WorkBuddyError(
+            ERROR_KEYS["WorkBuddy启动prompt超时"].format(
+                session_id=task.session_id
             )
+        )
     return transport
 
 
@@ -184,12 +204,30 @@ def _public(task: TaskState) -> dict[str, Any]:
 
 
 def _gc_tasks() -> int:
-    """回收 terminal 状态且超龄的 task。线程安全。返回清理数。
+    """回收 terminal 状态且超龄的 task + 超龄 active task。线程安全。返回清理数。
 
-    保留策略：按 finished_at 倒序，保留前 TASKS_MAX_KEEP 个 terminal task，
-    其余删除。active 状态（queued/connecting/running/observing/cancelling）永不被清理。
+    保留策略：
+    - terminal（completed/failed/cancelled）：按 finished_at 倒序，保留前 TASKS_MAX_KEEP 个，其余删除。
+    - active（queued/connecting/running/observing/cancelling）：created_at 超 TASK_ACTIVE_TIMEOUT_SECONDS 的
+      标记 failed 并删除，避免 _run 线程异常退出导致的内存泄漏。
     """
+    active_states = {"queued", "connecting", "running", "observing", "cancelling"}
+    now = time.time()
     with TASKS_LOCK:
+        # 1. 清理超龄 active task（_run 线程异常退出未设 state 的泄漏）
+        stale_active = [
+            tid
+            for tid, t in TASKS.items()
+            if t.state in active_states
+            and now - t.created_at > TASK_ACTIVE_TIMEOUT_SECONDS
+        ]
+        for tid in stale_active:
+            t = TASKS[tid]
+            t.state = "failed"
+            t.error = "任务超时清理"
+            t.finished_at = now
+            del TASKS[tid]
+        # 2. 清理超龄 terminal task（保留前 TASKS_MAX_KEEP）
         terminal: list[tuple[str, float]] = []
         for tid, t in TASKS.items():
             if t.state in {"completed", "failed", "cancelled"}:
@@ -199,7 +237,7 @@ def _gc_tasks() -> int:
         evict = [tid for tid, _ in terminal[TASKS_MAX_KEEP:]]
         for tid in evict:
             del TASKS[tid]
-        return len(evict)
+        return len(stale_active) + len(evict)
 
 
 def _run(task: TaskState, timeout_seconds: float) -> None:
@@ -282,17 +320,17 @@ def _run(task: TaskState, timeout_seconds: float) -> None:
                     break
         if not stop_reason:
             raise WorkBuddyError(
-                ERROR_KEYS["workbuddy_session_timeout"].format(
+                ERROR_KEYS["WorkBuddy会话超时"].format(
                     session_id=task.session_id
                 )
             )
         if stop_reason == "cancelled":
             task.state = "cancelled"
-            task.error = ERROR_KEYS["workbuddy_session_cancelled"]
+            task.error = ERROR_KEYS["WorkBuddy会话已取消"]
             return
         if stop_reason != "end_turn":
             raise WorkBuddyError(
-                ERROR_KEYS["workbuddy_session_abnormal_end"].format(
+                ERROR_KEYS["WorkBuddy会话异常结束"].format(
                     stop_reason=stop_reason
                 )
             )
@@ -311,10 +349,10 @@ def _run(task: TaskState, timeout_seconds: float) -> None:
             (transport.response or {}).get("title") or ""
         )
         if not wait_for_task_registration(task.session_id):
-            register_completed_session(
+            register_bridge_session(
                 task.session_id,
                 task.cwd,
-                generated_title=title,
+                title=title,
             )
         task.answer = task.channel.answer() or str(
             (transport.response or {}).get("answer") or ""
@@ -332,6 +370,15 @@ def _run(task: TaskState, timeout_seconds: float) -> None:
     except Exception as exc:
         task.state = "failed"
         task.error = str(exc)
+        # traceback 记到 activity log（不进 task.error，避免泄露内部细节给调用方）
+        activity_logger.record(
+            {
+                "activity": "异常详情",
+                "status": type(exc).__name__,
+                "session_id": task.session_id,
+                "detail": traceback.format_exc(),
+            }
+        )
         activity_logger.terminal(
             "任务执行失败",
             status=type(exc).__name__,
@@ -364,7 +411,7 @@ def workbuddy_status(task_id: str = "") -> dict[str, Any]:
         with TASKS_LOCK:
             task = TASKS.get(task_id)
         if not task:
-            return {"ok": False, "error": f"未知任务 ID: {task_id}"}
+            return err("未知任务ID", task_id=task_id)
         return {"ok": True, **_public(task)}
     try:
         server = discover_desktop_server()
@@ -396,9 +443,9 @@ def workbuddy_start(
     """Queue a task or optionally resume one bound S1/S2/S3 review session."""
     working_dir = Path(cwd or Path.cwd()).resolve()
     if not working_dir.is_dir():
-        return err("invalid_cwd", path=str(working_dir))
+        return err("无效工作目录", path=str(working_dir))
     if not prompt.strip():
-        return err("empty_prompt")
+        return err("空提示词")
     try:
         canonical_identity = normalize_identity(identity)
         canonical_resume_session_id = (
@@ -422,28 +469,22 @@ def workbuddy_start(
                 canonical_review_target,
             )
     except ValueError as exc:
-        return err("invalid_argument", message=str(exc))
+        return err("无效参数", message=str(exc))
     if canonical_resume_session_id:
         if canonical_identity not in REVIEW_IDENTITIES:
-            return {
-                "ok": False,
-                "error": f"只有 {', '.join(sorted(REVIEW_IDENTITIES))} 审查身份支持复用旧审查会话",
-            }
+            return err(
+                "审查会话不支持",
+                identities=", ".join(sorted(REVIEW_IDENTITIES)),
+            )
         if not canonical_review_target:
-            return {
-                "ok": False,
-                "error": "复用旧审查会话时必须提供 review_target（caller 未传入）",
-            }
+            return err("复审缺少审查目标")
     if canonical_review_target and canonical_identity not in ALL_REVIEW_IDENTITIES:
-        return {
-            "ok": False,
-            "error": f"review_target 只能与 {', '.join(sorted(ALL_REVIEW_IDENTITIES))} 审查身份一起使用",
-        }
+        return err(
+            "审查目标身份不支持",
+            identities=", ".join(sorted(ALL_REVIEW_IDENTITIES)),
+        )
     if canonical_identity == "docs-reviewer" and not canonical_review_target.strip():
-        return {
-            "ok": False,
-            "错误码": "缺少审查目标（caller 未传入 review_target）",
-        }
+        return err("缺少审查目标")
     task_id = f"wb-{uuid.uuid4().hex[:12]}"
     task = TaskState(
         task_id=task_id,
@@ -483,7 +524,7 @@ def workbuddy_wait(task_id: str, timeout_seconds: int = 55) -> dict[str, Any]:
     with TASKS_LOCK:
         task = TASKS.get(task_id)
     if not task:
-        return {"ok": False, "error": f"未知任务 ID: {task_id}"}
+        return err("未知任务ID", task_id=task_id)
     if task.state not in {"completed", "failed", "cancelled", "cancelling"}:
         with task.condition:
             task.condition.wait(timeout=max(0, min(timeout_seconds, 55)))
@@ -496,10 +537,10 @@ def workbuddy_cancel(task_id: str) -> dict[str, Any]:
     with TASKS_LOCK:
         task = TASKS.get(task_id)
     if not task:
-        return {"ok": False, "error": f"未知任务 ID: {task_id}"}
+        return err("未知任务ID", task_id=task_id)
     client = task.client
     if not client or not task.session_id:
-        return err("task_not_cancellable")
+        return err("任务不可取消")
     try:
         client.notify("session/cancel", {"sessionId": task.session_id})
         task.cancel_requested = True
