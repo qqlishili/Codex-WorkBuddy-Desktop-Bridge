@@ -127,8 +127,8 @@ def _dispatch_prompt(
     event_callback: Any,
     prompt: str,
 ) -> PromptTransport:
-    """Create one ACP session under PROMPT_DISPATCH_LOCK, then configure, throttle, and
-    wait for prompt start outside the lock so concurrent tasks don't block each other."""
+    """在 PROMPT_DISPATCH_LOCK 下创建一个 ACP session，然后 configure、节流、
+    等待 prompt 启动均在锁外执行，使并发任务互不阻塞。"""
     global LAST_PROMPT_DISPATCH_AT
     transport = PromptTransport()
 
@@ -425,7 +425,7 @@ def _run(task: TaskState, timeout_seconds: float) -> None:
 
 @mcp.tool()
 def workbuddy_status(task_id: str = "") -> dict[str, Any]:
-    """Check WorkBuddy desktop connectivity, or inspect one dispatched task."""
+    """检查 WorkBuddy 桌面连通性，或查看某个已派发任务的状态。"""
     if task_id:
         with TASKS_LOCK:
             task = TASKS.get(task_id)
@@ -459,7 +459,7 @@ def workbuddy_start(
     review_target: str = "",
     resume_review: bool = False,
 ) -> dict[str, Any]:
-    """Queue a task or optionally resume one bound S1/S2/S3 review session."""
+    """排队一个任务，或复用某个已绑定的 S1/S2/S3 审查会话。"""
     working_dir = Path(cwd or Path.cwd()).resolve()
     if not working_dir.is_dir():
         return err("无效工作目录", path=str(working_dir))
@@ -539,7 +539,7 @@ def workbuddy_start(
 
 @mcp.tool()
 def workbuddy_wait(task_id: str, timeout_seconds: int = 55) -> dict[str, Any]:
-    """Wait briefly for a WorkBuddy task; returns current state on timeout."""
+    """短暂等待 WorkBuddy 任务；超时返回当前状态。"""
     with TASKS_LOCK:
         task = TASKS.get(task_id)
     if not task:
@@ -552,7 +552,7 @@ def workbuddy_wait(task_id: str, timeout_seconds: int = 55) -> dict[str, Any]:
 
 @mcp.tool()
 def workbuddy_cancel(task_id: str) -> dict[str, Any]:
-    """Request cancellation of a running WorkBuddy task."""
+    """请求取消一个正在运行的 WorkBuddy 任务。"""
     with TASKS_LOCK:
         task = TASKS.get(task_id)
     if not task:
@@ -572,7 +572,7 @@ def workbuddy_cancel(task_id: str) -> dict[str, Any]:
 
 @mcp.tool()
 def workbuddy_list() -> dict[str, Any]:
-    """List tasks known to this bridge process."""
+    """列出桥接器进程内已知的任务。"""
     with TASKS_LOCK:
         tasks = list(TASKS.values())
     return {"ok": True, "tasks": [_public(task) for task in tasks]}
