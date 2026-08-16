@@ -22,7 +22,7 @@ __all__ = [
 
 
 def workbuddy_database_path() -> Path:
-    """Return the desktop history database used by the current WorkBuddy profile."""
+    """返回当前 WorkBuddy profile 使用的桌面历史数据库。"""
     return config_dir() / "workbuddy.db"
 
 
@@ -45,7 +45,7 @@ def wait_for_task_registration(
     database_path: str | Path | None = None,
     timeout_seconds: float = DEFAULT_REGISTRATION_WAIT_SECONDS,
 ) -> bool:
-    """Wait for WorkBuddy to persist a session through its native task path."""
+    """等待 WorkBuddy 通过原生任务路径持久化 session。"""
     db_path = Path(database_path) if database_path else workbuddy_database_path()
     deadline = time.monotonic() + max(0.0, timeout_seconds)
     while True:
@@ -72,7 +72,7 @@ def register_completed_session(
     database_path: str | Path | None = None,
     timestamp_ms: int | None = None,
 ) -> Path:
-    """Add an ACP transcript to WorkBuddy's task history without activating its window.
+    """把 ACP 对话记录加入 WorkBuddy 任务历史，但不激活其窗口。
 
     DEPRECATED: 改用 bridge_registry.register_bridge_session 解耦 WorkBuddy SQLite schema。
     保留此函数仅为向后兼容；新代码应调用 register_bridge_session。

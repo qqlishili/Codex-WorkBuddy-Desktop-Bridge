@@ -110,7 +110,7 @@ def event_to_activity(
     event: dict[str, Any],
     cwd: str | Path,
 ) -> dict[str, Any] | None:
-    """Convert one ACP event into a content-free activity record."""
+    """把单个 ACP 事件转换为不含内容的 activity 记录。"""
     params, update = _update(event)
     if not update:
         return None
@@ -143,8 +143,7 @@ def event_to_activity(
         }
 
     if session_update != "tool_call":
-        # This intentionally drops thought, answer, prompt, title, usage, and
-        # all other streaming content.
+        # 有意丢弃 thought、answer、prompt、title、usage 及所有其他流式内容。
         return None
 
     raw = _raw_input(update)
@@ -194,7 +193,7 @@ def event_to_activity(
 
 
 class ActivityLogger:
-    """Write compact JSONL activity records without model or tool content.
+    """写入不含模型或工具内容的紧凑 JSONL activity 记录。
 
     P2-3: 改 append-only 写——每条 record 立即追加单条 JSON 行（count=1）。
     放弃原合并语义（连续同活动累加 count）以严格 O(n) 写入，避免长任务 O(n²) 写放大。

@@ -253,8 +253,7 @@ def prepare_review_resume(
             )
         previous_sha256 = existing.get("baseline_sha256")
     else:
-        # Older sessions can be adopted once, but only when their transcript
-        # proves that both the requested identity and target are correct.
+        # 旧会话只能采纳一次，且仅当其对话记录证明请求的身份和目标都正确时。
         combined = "\n".join(_transcript_user_texts(transcript))
         identity_markers = (f"你是 {identity}", f"你是{identity}", f" {identity}")
         if not any(marker in combined for marker in identity_markers):
