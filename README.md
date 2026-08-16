@@ -28,7 +28,7 @@
 
 ## 身份角色与配置
 
-桥接器内置四个身份。`identity` 只选择角色，角色的完整提示词由桥接器从
+桥接器内置五个身份。`identity` 只选择角色，角色的完整提示词由桥接器从
 `workbuddy_bridge/identities.py` 注入；调用方不需要每次重复发送身份说明。
 
 | 身份 | 默认职责 | 支持复用旧审查会话 |
@@ -37,6 +37,8 @@
 | `S1` | 语法、拼写、明显代码错误和低级问题 | 是 |
 | `S2` | 依赖漏洞、供应链和高风险依赖检查 | 是 |
 | `S3` | 命名、格式、结构和可维护性检查 | 是 |
+| `env-intel` | 只读探测 WorkBuddy 运行时（env 变量、目录、git、connector 状态等） | 否 |
+| `docs-reviewer` | 对抗式审查设计文档/实施计划；必须传 review_target | 否 |
 
 角色提示词只负责定义行为边界和输出要求。所有 Worker 会话仍然使用
 `fullAccess`，工具不会逐次询问权限；如果需要限制工具能力，必须同时修改权限配置，
@@ -57,8 +59,9 @@
 }
 ```
 
-- `identity`：填写 `online-search`、`S1`、`S2` 或 `S3`；也接受 `online_search`、`s1`、
-  `s2`、`s3` 这些别名。省略时保留自由 prompt 的兼容行为。
+- `identity`：填写 `online-search`、`S1`、`S2`、`S3`、`env-intel` 或 `docs-reviewer`；也接受
+  `online_search`、`s1`、`s2`、`s3`、`s0`、`env_intel`、`docs_reviewer`、
+  `doc-reviewer`、`doc_reviewer`、`文档审查员` 这些别名。省略时保留自由 prompt 的兼容行为。
 - `model`：指定 WorkBuddy 模型。省略时，临时 Host 默认使用
   `deepseek-v4-flash`。
 - `reasoning_effort`：传递 WorkBuddy 的推理强度，例如 `low`、`medium`、`high` 或
@@ -128,8 +131,8 @@ WorkBuddy 必须处于运行状态。精简动作日志保存在 `work/workbuddy
 
 `workbuddy_start` 的默认任务超时为 300 秒。路由技能在 5 分钟内未获得终态时会先取消仍在运行的 WorkBuddy session，再使用对应的 Codex 子代理完成兜底。
 
-四个身份的完整提示词保存在桥接器内部。Codex 调用 `workbuddy_start` 时只传
-`identity="online-search|S1|S2|S3"` 和任务正文，不再在每次 MCP 调用中
+五个身份的完整提示词保存在桥接器内部。Codex 调用 `workbuddy_start` 时只传
+`identity="online-search|S1|S2|S3|env-intel|docs-reviewer"` 和任务正文，不再在每次 MCP 调用中
 重复传递身份说明。省略 `identity` 时仍兼容原来的自由 prompt 调用。
 
 ## 审查与复审
