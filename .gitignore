@@ -17,5 +17,9 @@ outputs/
 .env.*
 *.local
 
+.serena/
+.workbuddy/
+.superpowers/
+
 .scratch/
 docs/specs/
