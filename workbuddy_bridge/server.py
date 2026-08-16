@@ -76,6 +76,7 @@ class TaskState:
 
 
 TASKS: dict[str, TaskState] = {}
+TASKS_MAX_KEEP = 64  # 保留最近 N 个 terminal state task；超出部分清理
 TASKS_LOCK = threading.Lock()
 PROMPT_DISPATCH_INTERVAL_SECONDS = 1.0
 PROMPT_DISPATCH_LOCK = threading.Lock()
@@ -177,6 +178,25 @@ def _public(task: TaskState) -> dict[str, Any]:
         "started_at": task.started_at,
         "finished_at": task.finished_at,
     }
+
+
+def _gc_tasks() -> int:
+    """回收 terminal 状态且超龄的 task。线程安全。返回清理数。
+
+    保留策略：按 finished_at 倒序，保留前 TASKS_MAX_KEEP 个 terminal task，
+    其余删除。active 状态（queued/connecting/running/observing/cancelling）永不被清理。
+    """
+    with TASKS_LOCK:
+        terminal: list[tuple[str, float]] = []
+        for tid, t in TASKS.items():
+            if t.state in {"completed", "failed", "cancelled"}:
+                finished = t.finished_at or 0.0
+                terminal.append((tid, finished))
+        terminal.sort(key=lambda item: item[1], reverse=True)
+        evict = [tid for tid, _ in terminal[TASKS_MAX_KEEP:]]
+        for tid in evict:
+            del TASKS[tid]
+        return len(evict)
 
 
 def _run(task: TaskState, timeout_seconds: float) -> None:
@@ -327,6 +347,7 @@ def _run(task: TaskState, timeout_seconds: float) -> None:
         task.finished_at = task.updated_at
         with task.condition:
             task.condition.notify_all()
+        _gc_tasks()
 
 
 @mcp.tool()
