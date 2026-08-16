@@ -20,7 +20,7 @@ For every WorkBuddy task, pass only the task body and its identity key. Do not p
 
 ```text
 workbuddy_start(
-  identity=<"online-search" | "S1" | "S2" | "S3" | "env-intel">,
+  identity=<"online-search" | "S1" | "S2" | "S3" | "env-intel" | "docs-reviewer">,
   prompt=<complete task only>,
   cwd=<working directory>,
   model="deepseek-v4-flash",
@@ -77,5 +77,6 @@ workbuddy_start(
 - Internet research, current facts, fact checking, or source gathering: use `online-search`.
 - Code review: use S1, S2, and S3 together unless the user explicitly requests one identity.
 - Local workbuddy environment probe (探测 WorkBuddy 运行时：env 变量、目录、git、connector 状态等): use `env-intel`.
+- Spec/ticket document review (跨项目设计文档/实施计划审查): use `docs-reviewer`. review_target = caller 传入的绝对文档路径。
 - A mixed research and code-review request may use `online-search` plus all three reviewers.
 - Explicit identity names from the user override automatic routing.

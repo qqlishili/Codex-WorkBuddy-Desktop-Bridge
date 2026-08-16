@@ -19,6 +19,11 @@ class IdentityTests(unittest.TestCase):
         self.assertEqual(normalize_identity("env-intel"), "env-intel")
         self.assertEqual(normalize_identity("s0"), "env-intel")
         self.assertEqual(normalize_identity("env_intel"), "env-intel")
+        self.assertEqual(normalize_identity("docs-reviewer"), "docs-reviewer")
+        self.assertEqual(normalize_identity("docs_reviewer"), "docs-reviewer")
+        self.assertEqual(normalize_identity("doc-reviewer"), "docs-reviewer")
+        self.assertEqual(normalize_identity("doc_reviewer"), "docs-reviewer")
+        self.assertEqual(normalize_identity("文档审查员"), "docs-reviewer")
 
     def test_rejects_unknown_identity(self) -> None:
         with self.assertRaisesRegex(ValueError, "identity must be one of"):
@@ -40,7 +45,7 @@ class IdentityTests(unittest.TestCase):
             workbuddy_start("task", identity="reviewer"),
             {
                 "ok": False,
-                "error": "identity must be one of: online-search, S1, S2, S3, env-intel",
+                "error": "identity must be one of: online-search, S1, S2, S3, env-intel, docs-reviewer",
             },
         )
 
