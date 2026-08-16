@@ -20,6 +20,7 @@ outputs/
 .serena/
 .workbuddy/
 .superpowers/
+.codegraph/
 
 .scratch/
 docs/specs/
