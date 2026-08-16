@@ -23,6 +23,8 @@ from workbuddy_bridge.identities import compose_identity_prompt, normalize_ident
 from workbuddy_bridge.multiplexer import SessionEventChannel
 from workbuddy_bridge.review_sessions import (
     REVIEW_IDENTITIES,
+    DOC_REVIEW_IDENTITIES,
+    ALL_REVIEW_IDENTITIES,
     bind_review_session,
     build_rereview_prompt,
     find_review_session,
@@ -404,10 +406,15 @@ def workbuddy_start(
                 "ok": False,
                 "error": "复用旧审查会话时必须提供 review_target",
             }
-    if canonical_review_target and canonical_identity not in REVIEW_IDENTITIES:
+    if canonical_review_target and canonical_identity not in ALL_REVIEW_IDENTITIES:
         return {
             "ok": False,
-            "error": "review_target 只能与 S1、S2、S3 审查身份一起使用",
+            "error": f"review_target 只能与 {', '.join(sorted(ALL_REVIEW_IDENTITIES))} 审查身份一起使用",
+        }
+    if canonical_identity == "docs-reviewer" and not canonical_review_target.strip():
+        return {
+            "ok": False,
+            "错误码": "缺少审查目标（caller 未传入 review_target）",
         }
     task_id = f"wb-{uuid.uuid4().hex[:12]}"
     task = TaskState(

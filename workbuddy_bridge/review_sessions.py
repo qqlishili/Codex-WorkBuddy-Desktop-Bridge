@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any
 
 REVIEW_IDENTITIES = frozenset({"S1", "S2", "S3"})
+DOC_REVIEW_IDENTITIES = frozenset({"docs-reviewer"})
+ALL_REVIEW_IDENTITIES = REVIEW_IDENTITIES | DOC_REVIEW_IDENTITIES
 REGISTRY_FILENAME = "codex-review-sessions.json"
 _REGISTRY_LOCK = threading.Lock()
 

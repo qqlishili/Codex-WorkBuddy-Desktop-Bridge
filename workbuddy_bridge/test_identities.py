@@ -49,6 +49,15 @@ class IdentityTests(unittest.TestCase):
             },
         )
 
+    def test_start_rejects_docs_reviewer_without_review_target(self) -> None:
+        self.assertEqual(
+            workbuddy_start("task", identity="docs-reviewer"),
+            {
+                "ok": False,
+                "错误码": "缺少审查目标（caller 未传入 review_target）",
+            },
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
