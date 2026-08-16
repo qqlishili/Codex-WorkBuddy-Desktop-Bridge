@@ -15,6 +15,7 @@ from typing import Any
 from workbuddy_bridge.config import config_dir
 
 REGISTRY_FILENAME = "bridge-sessions.json"
+REGISTRY_MAX_KEEP = 64  # 保留最近 N 个 session；超出按 updated_at 淘汰最旧（对齐 server.TASKS_MAX_KEEP）
 _REGISTRY_LOCK = threading.Lock()
 
 
@@ -89,6 +90,14 @@ def register_bridge_session(
             "created_at": created_at,
             "updated_at": now,
         }
+        # 容量上限：保留最近 REGISTRY_MAX_KEEP 个，超出按 updated_at 倒序淘汰最旧
+        if len(sessions) > REGISTRY_MAX_KEEP:
+            ordered = sorted(
+                sessions.items(),
+                key=lambda item: item[1].get("updated_at", 0),
+                reverse=True,
+            )
+            data["sessions"] = {k: v for k, v in ordered[:REGISTRY_MAX_KEEP]}
         _write_registry_unlocked(data)
     return registry_path()
 
@@ -100,4 +109,4 @@ def list_bridge_sessions() -> dict[str, Any]:
     return data["sessions"]
 
 
-__all__ = ["register_bridge_session", "list_bridge_sessions", "registry_path"]
+__all__ = ["register_bridge_session", "list_bridge_sessions", "registry_path", "REGISTRY_MAX_KEEP"]

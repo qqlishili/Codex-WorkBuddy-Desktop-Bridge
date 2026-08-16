@@ -96,5 +96,54 @@ class IdentityTests(unittest.TestCase):
                 mock_spawn.assert_called_once()
 
 
+class StatusCancelErrorContractTests(unittest.TestCase):
+    def test_status_discover_failure_returns_error_code(self) -> None:
+        """workbuddy_status discover 失败 → 含 错误码 + connected=False（保留契约字段）。"""
+        from unittest.mock import Mock
+
+        from workbuddy_bridge.acp import WorkBuddyError
+        from workbuddy_bridge.server import workbuddy_status
+
+        with patch(
+            "workbuddy_bridge.server.discover_desktop_server",
+            side_effect=WorkBuddyError("discovery failed"),
+        ):
+            result = workbuddy_status()
+        self.assertFalse(result["ok"])
+        self.assertFalse(result["connected"])
+        self.assertEqual(result["错误码"], "WorkBuddy桌面不可用")
+        self.assertIn("discovery failed", result["error"])
+
+    def test_cancel_notify_failure_returns_error_code(self) -> None:
+        """workbuddy_cancel notify 失败 → 含 错误码 + state（保留契约字段）。"""
+        from unittest.mock import Mock
+
+        from workbuddy_bridge.acp import WorkBuddyError
+        from workbuddy_bridge.server import (
+            TASKS,
+            TASKS_LOCK,
+            TaskState,
+            workbuddy_cancel,
+        )
+
+        client = Mock()
+        client.notify.side_effect = WorkBuddyError("notify failed")
+        task = TaskState(task_id="t1", prompt="p", cwd="/p")
+        task.client = client
+        task.session_id = "session-1"
+        task.state = "running"
+        with TASKS_LOCK:
+            TASKS["t1"] = task
+        try:
+            result = workbuddy_cancel("t1")
+        finally:
+            with TASKS_LOCK:
+                TASKS.pop("t1", None)
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["错误码"], "取消请求发送失败")
+        self.assertEqual(result["state"], "running")
+        self.assertIn("notify failed", result["error"])
+
+
 if __name__ == "__main__":
     unittest.main()

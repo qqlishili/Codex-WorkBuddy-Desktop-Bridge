@@ -97,6 +97,21 @@ class BridgeRegistryTests(unittest.TestCase):
         # registry 文件应是合法 JSON
         json.loads(registry_path().read_text(encoding="utf-8"))
 
+    def test_evicts_oldest_sessions_beyond_capacity(self) -> None:
+        """写入超过 REGISTRY_MAX_KEEP 个 session，最旧的被淘汰。"""
+        from workbuddy_bridge.bridge_registry import REGISTRY_MAX_KEEP
+
+        for i in range(REGISTRY_MAX_KEEP + 3):
+            register_bridge_session(f"s{i}", "/p", timestamp_ms=i)
+
+        sessions = list_bridge_sessions()
+        self.assertEqual(len(sessions), REGISTRY_MAX_KEEP)
+        # 最旧的 s0/s1/s2（updated_at 最小）被淘汰；最新的保留
+        self.assertNotIn("s0", sessions)
+        self.assertNotIn("s1", sessions)
+        self.assertNotIn("s2", sessions)
+        self.assertIn(f"s{REGISTRY_MAX_KEEP + 2}", sessions)
+
 
 if __name__ == "__main__":
     unittest.main()

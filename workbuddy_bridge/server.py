@@ -444,7 +444,9 @@ def workbuddy_status(task_id: str = "") -> dict[str, Any]:
             "event_routing": "isolated_runtime_per_task",
         }
     except Exception as exc:
-        return {"ok": False, "connected": False, "error": str(exc)}
+        result = err("WorkBuddy桌面不可用", detail=str(exc))
+        result["connected"] = False  # 保留 connected 契约字段（routing skill 依赖）
+        return result
 
 
 @mcp.tool()
@@ -567,7 +569,9 @@ def workbuddy_cancel(task_id: str) -> dict[str, Any]:
         task.updated_at = time.time()
         return {"ok": True, **_public(task)}
     except WorkBuddyError as exc:
-        return {"ok": False, "state": task.state, "error": str(exc)}
+        result = err("取消请求发送失败", detail=str(exc))
+        result["state"] = task.state  # 保留 state 契约字段（调用方可读当前状态）
+        return result
 
 
 @mcp.tool()
