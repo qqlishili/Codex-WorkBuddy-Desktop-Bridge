@@ -48,6 +48,24 @@ mcp = FastMCP(
     log_level="WARNING",
 )
 
+__all__ = [
+    "mcp",
+    "TaskState",
+    "TASKS",
+    "TASKS_MAX_KEEP",
+    "TASK_ACTIVE_TIMEOUT_SECONDS",
+    "MAX_CONCURRENT_TASKS",
+    "PROMPTTransport",
+    "_dispatch_prompt",
+    "_gc_tasks",
+    "_public",
+    "workbuddy_status",
+    "workbuddy_start",
+    "workbuddy_wait",
+    "workbuddy_cancel",
+    "workbuddy_list",
+]
+
 
 @dataclass
 class TaskState:
@@ -84,6 +102,7 @@ class TaskState:
 TASKS: dict[str, TaskState] = {}
 TASKS_MAX_KEEP = 64  # 保留最近 N 个 terminal state task；超出部分清理
 TASK_ACTIVE_TIMEOUT_SECONDS = 3600  # active task 最长存活；超龄标记 failed 并清理
+MAX_CONCURRENT_TASKS = 4  # workbuddy_status 报告的最大并发任务数；未来可改运行时探测（需 WorkBuddy API 支持）
 TASKS_LOCK = threading.Lock()
 PROMPT_DISPATCH_INTERVAL_SECONDS = 1.0
 PROMPT_DISPATCH_LOCK = threading.Lock()  # 只保护 new_session/load_session 的 ACP Host 串行化
@@ -421,7 +440,7 @@ def workbuddy_status(task_id: str = "") -> dict[str, Any]:
             "endpoint": server.acp_endpoint,
             "sidecar_pid": server.sidecar_pid,
             "host_session_id": server.session_host_id,
-            "max_concurrent_tasks": 4,
+            "max_concurrent_tasks": MAX_CONCURRENT_TASKS,
             "event_routing": "isolated_runtime_per_task",
         }
     except Exception as exc:
