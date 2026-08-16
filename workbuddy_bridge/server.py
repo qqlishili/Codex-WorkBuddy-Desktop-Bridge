@@ -336,7 +336,7 @@ def workbuddy_status(task_id: str = "") -> dict[str, Any]:
         with TASKS_LOCK:
             task = TASKS.get(task_id)
         if not task:
-            return {"ok": False, "error": f"Unknown task_id: {task_id}"}
+            return {"ok": False, "error": f"未知任务 ID: {task_id}"}
         return {"ok": True, **_public(task)}
     try:
         server = discover_desktop_server()
@@ -384,10 +384,10 @@ def workbuddy_start(
             else ""
         )
         if resume_review and canonical_identity not in REVIEW_IDENTITIES:
-            raise ValueError("resume_review 只能与 S1、S2、S3 一起使用")
+            raise ValueError(f"resume_review 只能与 {', '.join(sorted(ALL_REVIEW_IDENTITIES))} 审查身份一起使用")
         if resume_review and not canonical_resume_session_id:
             if not canonical_review_target:
-                raise ValueError("自动复审时必须提供 review_target")
+                raise ValueError("自动复审时必须提供 review_target（caller 未传入）")
             canonical_resume_session_id = find_review_session(
                 canonical_identity,
                 str(working_dir),
@@ -399,12 +399,12 @@ def workbuddy_start(
         if canonical_identity not in REVIEW_IDENTITIES:
             return {
                 "ok": False,
-                "error": "只有 S1、S2、S3 支持复用旧审查会话",
+                "error": f"只有 {', '.join(sorted(REVIEW_IDENTITIES))} 审查身份支持复用旧审查会话",
             }
         if not canonical_review_target:
             return {
                 "ok": False,
-                "error": "复用旧审查会话时必须提供 review_target",
+                "error": "复用旧审查会话时必须提供 review_target（caller 未传入）",
             }
     if canonical_review_target and canonical_identity not in ALL_REVIEW_IDENTITIES:
         return {
@@ -440,6 +440,7 @@ def workbuddy_start(
         "task_id": task_id,
         "state": task.state,
         "cwd": task.cwd,
+        "identity": canonical_identity or None,
         "resume_session_id": task.resume_session_id or None,
         "review_target": task.review_target or None,
         "resume_review": task.resume_review,
@@ -454,8 +455,8 @@ def workbuddy_wait(task_id: str, timeout_seconds: int = 55) -> dict[str, Any]:
     with TASKS_LOCK:
         task = TASKS.get(task_id)
     if not task:
-        return {"ok": False, "error": f"Unknown task_id: {task_id}"}
-    if task.state not in {"completed", "failed", "cancelled"}:
+        return {"ok": False, "error": f"未知任务 ID: {task_id}"}
+    if task.state not in {"completed", "failed", "cancelled", "cancelling"}:
         with task.condition:
             task.condition.wait(timeout=max(0, min(timeout_seconds, 55)))
     return {"ok": True, **_public(task)}
@@ -467,7 +468,7 @@ def workbuddy_cancel(task_id: str) -> dict[str, Any]:
     with TASKS_LOCK:
         task = TASKS.get(task_id)
     if not task:
-        return {"ok": False, "error": f"Unknown task_id: {task_id}"}
+        return {"ok": False, "error": f"未知任务 ID: {task_id}"}
     client = task.client
     if not client or not task.session_id:
         return {"ok": False, "state": task.state, "error": "Task is not cancellable right now"}
