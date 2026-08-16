@@ -6,8 +6,6 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from workbuddy_bridge.acp import (
-    AcpClient,
-    DesktopServer,
     WorkBuddyError,
     _event_session_id,
     _message_text,
@@ -108,92 +106,3 @@ class SessionEventChannel:
             events = list(self.events)
         return "".join(filter(None, (_message_text(event) for event in events))).strip()
 
-
-class AcpEventMultiplexer:
-    """Observe one WorkBuddy ACP broadcast stream and route events by sessionId."""
-
-    def __init__(self, server: DesktopServer) -> None:
-        self.server = server
-        self._client = AcpClient(server)
-        self._channels: dict[str, SessionEventChannel] = {}
-        self._channels_lock = threading.Lock()
-        self._ready = threading.Event()
-        self._closed = threading.Event()
-        self._thread: threading.Thread | None = None
-        self.error = ""
-
-    def start(self, timeout_seconds: float = 10.0) -> None:
-        self._client.connect()
-        self._thread = threading.Thread(
-            target=self._listen,
-            name="workbuddy-acp-observer",
-            daemon=True,
-        )
-        self._thread.start()
-        if not self._ready.wait(timeout_seconds):
-            self.close()
-            raise WorkBuddyError("WorkBuddy ACP observation stream did not become ready")
-        if self.error:
-            raise WorkBuddyError(self.error)
-
-    def _listen(self) -> None:
-        try:
-            self._client.listen(self._route, ready_event=self._ready)
-            if not self._closed.is_set():
-                raise WorkBuddyError("WorkBuddy ACP observation stream closed unexpectedly")
-        except Exception as exc:
-            if not self._closed.is_set():
-                self.error = f"WorkBuddy ACP observer failed: {exc}"
-                self._ready.set()
-                with self._channels_lock:
-                    channels = list(self._channels.values())
-                for channel in channels:
-                    channel.fail(self.error)
-
-    def _route(self, event: dict[str, Any]) -> None:
-        session_id = _event_session_id(event)
-        if not session_id:
-            return
-        with self._channels_lock:
-            channel = self._channels.get(session_id)
-        if channel:
-            channel.feed(event)
-
-    def subscribe(
-        self,
-        session_id: str,
-        *,
-        event_callback: EventCallback | None = None,
-    ) -> SessionEventChannel:
-        channel = SessionEventChannel(session_id, event_callback=event_callback)
-        with self._channels_lock:
-            if session_id in self._channels:
-                raise WorkBuddyError(f"Session is already observed: {session_id}")
-            self._channels[session_id] = channel
-        return channel
-
-    def unsubscribe(self, session_id: str) -> None:
-        with self._channels_lock:
-            self._channels.pop(session_id, None)
-
-    def close(self) -> None:
-        self._closed.set()
-        self._client.close()
-
-
-_MULTIPLEXER: AcpEventMultiplexer | None = None
-_MULTIPLEXER_LOCK = threading.Lock()
-
-
-def shared_multiplexer(server: DesktopServer) -> AcpEventMultiplexer:
-    global _MULTIPLEXER
-    with _MULTIPLEXER_LOCK:
-        current = _MULTIPLEXER
-        if current and not current.error and current.server.acp_endpoint == server.acp_endpoint:
-            return current
-        if current:
-            current.close()
-        current = AcpEventMultiplexer(server)
-        current.start()
-        _MULTIPLEXER = current
-        return current
