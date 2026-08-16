@@ -1,11 +1,11 @@
 ---
 name: workbuddy-agent-routing
-description: Route delegated work to four named WorkBuddy identities. Use whenever a task requires internet search, current-information lookup, fact checking, source collection, code review, review follow-up, 联网搜索, 资料核对, 来源整理, 事实查证, 时效信息查询, 代码审核, 代码审查, 复审, or 再次审查. Send research to online-search and code reviews to S1, S2, and S3. Prefer WorkBuddy with deepseek-v4-flash and low reasoning.
+description: Route delegated work to five named WorkBuddy identities. Use whenever a task requires internet search, current-information lookup, fact checking, source collection, code review, review follow-up, 联网搜索, 资料核对, 来源整理, 事实查证, 时效信息查询, 代码审核, 代码审查, 复审, 再次审查, or workbuddy environment probe. Send research to online-search, code reviews to S1, S2, and S3, and local workbuddy environment probes to env-intel. Prefer WorkBuddy with deepseek-v4-flash and low reasoning.
 ---
 
 # WorkBuddy Agent Routing
 
-The bridge owns the four WorkBuddy identity prompts. Keep the identity scopes distinct.
+The bridge owns the five WorkBuddy identity prompts. Keep the identity scopes distinct.
 
 ## Runtime selection
 
@@ -20,7 +20,7 @@ For every WorkBuddy task, pass only the task body and its identity key. Do not p
 
 ```text
 workbuddy_start(
-  identity=<"online-search" | "S1" | "S2" | "S3">,
+  identity=<"online-search" | "S1" | "S2" | "S3" | "env-intel">,
   prompt=<complete task only>,
   cwd=<working directory>,
   model="deepseek-v4-flash",
@@ -76,5 +76,6 @@ workbuddy_start(
 
 - Internet research, current facts, fact checking, or source gathering: use `online-search`.
 - Code review: use S1, S2, and S3 together unless the user explicitly requests one identity.
+- Local workbuddy environment probe (探测 WorkBuddy 运行时：env 变量、目录、git、connector 状态等): use `env-intel`.
 - A mixed research and code-review request may use `online-search` plus all three reviewers.
 - Explicit identity names from the user override automatic routing.
