@@ -10,6 +10,7 @@ from unittest.mock import Mock, patch
 from workbuddy_bridge.acp import (
     AcpClient,
     DesktopServer,
+    _candidate_sidecars,
     _session_events,
     spawn_isolated_server,
 )
@@ -220,6 +221,36 @@ class TaskSessionTests(unittest.TestCase):
                 ["--session-id", "existing-session"],
             )
             self.assertTrue(runtime.session_host_id.startswith("codex-worker-"))
+
+
+class CandidateSidecarsTests(unittest.TestCase):
+    def test_filters_dead_pid_files(self) -> None:
+        """死进程的 sidecar.pid 被过滤，候选为空。"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            pid_dir = Path(temp_dir) / "wb" / "dead-runtime"
+            pid_dir.mkdir(parents=True)
+            (pid_dir / "sidecar.pid").write_text(
+                '{"pid": 99999999, "token": "x", "version": 3}', encoding="utf-8"
+            )
+            with patch.dict(os.environ, {"TEMP": str(Path(temp_dir))}):
+                # patch 存活探测消除对真实进程的依赖（spec Testing Decisions 原意）
+                with patch("workbuddy_bridge.acp._pid_alive", return_value=False):
+                    self.assertEqual(_candidate_sidecars(), [])
+
+    def test_keeps_alive_pid_files(self) -> None:
+        """存活进程的 sidecar.pid 被保留，候选包含其 pid 与 pipe。"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            pid_dir = Path(temp_dir) / "wb" / "alive-runtime"
+            pid_dir.mkdir(parents=True)
+            (pid_dir / "sidecar.pid").write_text(
+                '{"pid": 12345, "token": "x", "version": 3}', encoding="utf-8"
+            )
+            with patch.dict(os.environ, {"TEMP": str(Path(temp_dir))}):
+                with patch("workbuddy_bridge.acp._pid_alive", return_value=True):
+                    candidates = _candidate_sidecars()
+                    self.assertEqual(len(candidates), 1)
+                    self.assertEqual(candidates[0][2], 12345)
+                    self.assertIn("alive-runtime", candidates[0][1])
 
 
 if __name__ == "__main__":
