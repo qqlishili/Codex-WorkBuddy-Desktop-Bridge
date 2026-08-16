@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
+from unittest.mock import patch
 
+from workbuddy_bridge.acp import DesktopServer
 from workbuddy_bridge.identities import (
     IDENTITIES,
     compose_identity_prompt,
@@ -57,6 +60,40 @@ class IdentityTests(unittest.TestCase):
         self.assertEqual(
             result["error"], "缺少审查目标（caller 未传入 review_target）"
         )
+
+    def test_start_with_mock_does_not_dispatch_real_task(self) -> None:
+        """mock spawn_isolated_server 后 workbuddy_start 返回 task_id 且 mock 被调用（隔离生效）。"""
+        import time
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake_server = DesktopServer(
+                "http://127.0.0.1:1/api/v1/acp", "", "host", "pipe", 1
+            )
+            with (
+                patch(
+                    "workbuddy_bridge.server.discover_desktop_server",
+                    return_value=fake_server,
+                ) as mock_discover,
+                patch(
+                    "workbuddy_bridge.server.spawn_isolated_server",
+                    return_value=fake_server,
+                ) as mock_spawn,
+                patch(
+                    "workbuddy_bridge.server.wait_for_task_registration",
+                    return_value=False,
+                ),
+                patch(
+                    "workbuddy_bridge.bridge_registry.register_bridge_session",
+                    return_value=None,
+                ),
+            ):
+                result = workbuddy_start("task", cwd=tmpdir)
+                self.assertTrue(result["ok"], f"workbuddy_start should succeed, got {result}")
+                self.assertIn("task_id", result)
+                # _run 线程异步跑，等 0.2s 让 mock 被调用
+                time.sleep(0.2)
+                # mock 被调用（隔离生效，未真派发到 WorkBuddy）
+                mock_discover.assert_called_once()
+                mock_spawn.assert_called_once()
 
 
 if __name__ == "__main__":
