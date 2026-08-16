@@ -42,6 +42,9 @@ _MAX_DETAILS = 5
 _MAX_DETAIL_LENGTH = 240
 
 
+__all__ = ["ActivityLogger", "event_to_activity"]
+
+
 def _update(event: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     params = event.get("params")
     if not isinstance(params, dict):
@@ -191,7 +194,11 @@ def event_to_activity(
 
 
 class ActivityLogger:
-    """Write compact JSONL activity records without model or tool content."""
+    """Write compact JSONL activity records without model or tool content.
+
+    P2-3: 改 append-only 写——每条 record 立即追加单条 JSON 行（count=1）。
+    放弃原合并语义（连续同活动累加 count）以严格 O(n) 写入，避免长任务 O(n²) 写放大。
+    """
 
     def __init__(
         self,
@@ -204,11 +211,6 @@ class ActivityLogger:
         self.cwd = Path(cwd).resolve()
         self.task_id = task_id
         self._lock = threading.Lock()
-        self._records: list[dict[str, Any]] = []
-        self._pending: dict[str, Any] | None = None
-        self._pending_started_at = 0.0
-        self._count = 0
-        self._details: list[str] = []
 
     def feed(self, event: dict[str, Any]) -> None:
         record = event_to_activity(event, self.cwd)
@@ -216,30 +218,15 @@ class ActivityLogger:
             self.record(record)
 
     def record(self, record: dict[str, Any]) -> None:
-        with self._lock:
-            if self._same_activity(record):
-                self._count += 1
-                detail = record.get("detail")
-                if (
-                    isinstance(detail, str)
-                    and detail
-                    and detail not in self._details
-                    and len(self._details) < _MAX_DETAILS
-                ):
-                    self._details.append(detail)
-                self._persist_unlocked()
-                return
-            self._finalize_pending_unlocked()
-            self._pending = {
-                key: value
-                for key, value in record.items()
-                if value is not None and key != "detail"
-            }
-            self._pending_started_at = time.time()
-            self._count = 1
-            detail = record.get("detail")
-            self._details = [detail] if isinstance(detail, str) and detail else []
-            self._persist_unlocked()
+        output: dict[str, Any] = {
+            "timestamp": time.time(),
+            **({"task_id": self.task_id} if self.task_id else {}),
+            **{k: v for k, v in record.items() if v is not None and k != "detail"},
+            "count": 1,
+        }
+        if detail := record.get("detail"):
+            output["details"] = [detail]
+        self._append(output)
 
     def terminal(
         self,
@@ -258,57 +245,12 @@ class ActivityLogger:
         self.close()
 
     def close(self) -> None:
+        # append-only 模式下，close 不需要做事（所有 record 已写入）
+        pass
+
+    def _append(self, output: dict[str, Any]) -> None:
+        """append 单条 JSON 行（append-only 写）。"""
         with self._lock:
-            self._finalize_pending_unlocked()
-            self._persist_unlocked()
-
-    def _same_activity(self, record: dict[str, Any]) -> bool:
-        if not self._pending:
-            return False
-        return (
-            self._pending.get("activity") == record.get("activity")
-            and self._pending.get("tool") == record.get("tool")
-            and self._pending.get("session_id") == record.get("session_id")
-            and "status" not in self._pending
-            and not record.get("status")
-        )
-
-    def _pending_output(self) -> dict[str, Any] | None:
-        if not self._pending:
-            return None
-        output = {
-            "timestamp": self._pending_started_at,
-            **({"task_id": self.task_id} if self.task_id else {}),
-            **self._pending,
-            "count": self._count,
-        }
-        if self._details:
-            output["details"] = list(self._details)
-        return output
-
-    def _finalize_pending_unlocked(self) -> None:
-        output = self._pending_output()
-        if output:
-            self._records.append(output)
-        self._pending = None
-        self._pending_started_at = 0.0
-        self._count = 0
-        self._details = []
-
-    def _persist_unlocked(self) -> None:
-        outputs = list(self._records)
-        pending = self._pending_output()
-        if pending:
-            outputs.append(pending)
-        if not outputs:
-            return
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = self.path.with_suffix(self.path.suffix + ".tmp")
-        temporary.write_text(
-            "".join(
-                json.dumps(output, ensure_ascii=False) + "\n"
-                for output in outputs
-            ),
-            encoding="utf-8",
-        )
-        temporary.replace(self.path)
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with self.path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(output, ensure_ascii=False) + "\n")

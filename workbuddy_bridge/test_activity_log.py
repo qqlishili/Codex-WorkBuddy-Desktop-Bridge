@@ -133,7 +133,11 @@ class ActivityEventTests(unittest.TestCase):
 
 
 class ActivityLoggerTests(unittest.TestCase):
-    def test_coalesces_repeated_actions_and_never_writes_stream_content(self) -> None:
+    def test_appends_each_record_independently_without_coalescing(self) -> None:
+        """P2-3: append-only 模式——每次 record 立即 append 单条（count=1），不合并连续同活动。
+
+        5 次 feed（agent_thought/answer 跳过 → 3 records）：Read1 + Read2 + session_end。
+        """
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             path = root / "task.jsonl"
@@ -180,11 +184,14 @@ class ActivityLoggerTests(unittest.TestCase):
                 if line.strip()
             ]
 
-        self.assertEqual(len(records), 2)
+        self.assertEqual(len(records), 3)
         self.assertEqual(records[0]["activity"], "正在读取文件")
-        self.assertEqual(records[0]["count"], 2)
-        self.assertEqual(records[0]["details"], ["one.py", "two.py"])
-        self.assertEqual(records[1]["activity"], "任务已完成")
+        self.assertEqual(records[0]["count"], 1)
+        self.assertEqual(records[0]["details"], ["one.py"])
+        self.assertEqual(records[1]["activity"], "正在读取文件")
+        self.assertEqual(records[1]["count"], 1)
+        self.assertEqual(records[1]["details"], ["two.py"])
+        self.assertEqual(records[2]["activity"], "任务已完成")
         self.assertNotIn("private chain of thought", content)
         self.assertNotIn("private final answer", content)
 
