@@ -84,53 +84,12 @@ def _rpc(pipe_path: str, method: str, params: dict[str, Any] | None = None) -> A
     return response.get("result")
 
 
-def _pid_alive(pid: int) -> bool:
-    """判断进程是否存活。
-
-    Windows 下不能用 os.kill(pid, 0) 探测存活：signal.CTRL_C_EVENT 的值是 0，
-    os.kill(pid, 0) 实际走 GenerateConsoleCtrlEvent（向进程发 Ctrl+C）分支，
-    对 GUI/无控制台进程（如 WorkBuddy.exe）必然抛 OSError errno=22，
-    会被误判为"进程已死"。改用 OpenProcess + GetExitCodeProcess 探测：
-    打开失败（ERROR_INVALID_PARAMETER=87）→ 进程不存在；
-    打开成功且退出码 == STILL_ACTIVE(259) → 存活。
-    """
-    if os.name != "nt" or pid <= 0:
-        # 非 Windows 或无效 PID：退回 os.kill(pid, 0) 语义
-        try:
-            os.kill(pid, 0)
-        except PermissionError:
-            return True  # 进程存在但无权限
-        except OSError:
-            return False
-        return True
-    import ctypes
-    from ctypes import wintypes
-
-    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-    STILL_ACTIVE = 259
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    # 必须精确声明签名：HANDLE 是 64 位 void*，若用默认 c_int restype 会截断高 32 位，
-    # 导致句柄值误判为 0（打开失败）→ 存活进程被误判为死（对齐 _process_executable 写法）。
-    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-    kernel32.OpenProcess.restype = wintypes.HANDLE
-    kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
-    kernel32.GetExitCodeProcess.restype = wintypes.BOOL
-    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-    kernel32.CloseHandle.restype = wintypes.BOOL
-    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-    if not handle:
-        # ERROR_ACCESS_DENIED(5) → 进程存在但权限不足（仍算存活）
-        return ctypes.get_last_error() == 5
-    try:
-        code = wintypes.DWORD()
-        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
-            return False
-        return code.value == STILL_ACTIVE
-    finally:
-        kernel32.CloseHandle(handle)
-
-
 def _candidate_sidecars() -> list[tuple[Path, str, int]]:
+    """收集所有候选 sidecar（不做存活过滤，靠 discover 的 _rpc 失败兜底）。
+
+    死进程的 sidecar.pid 会残留，但 discover_desktop_server 对死管道 _rpc 时
+    立即失败（~16ms）并被跳过，无需额外存活检查（奥卡姆剃刀）。
+    """
     temp_root = Path(os.environ.get("TEMP", "")) / "wb"
     candidates: list[tuple[Path, str, int]] = []
     if not temp_root.is_dir():
@@ -141,12 +100,9 @@ def _candidate_sidecars() -> list[tuple[Path, str, int]]:
             pid = int(payload["pid"])
             runtime_id = pid_file.parent.name
             pipe = rf"\\.\pipe\workbuddy-{runtime_id}-sidecar-control"
+            candidates.append((pid_file, pipe, pid))
         except (OSError, ValueError, KeyError, json.JSONDecodeError):
             continue
-        # 验证 PID 存活：Windows 下 os.kill(pid, 0) 语义错误（见 _pid_alive）
-        if not _pid_alive(pid):
-            continue  # 进程已死，跳过
-        candidates.append((pid_file, pipe, pid))
     candidates.sort(key=lambda item: item[0].stat().st_mtime, reverse=True)
     return candidates
 
