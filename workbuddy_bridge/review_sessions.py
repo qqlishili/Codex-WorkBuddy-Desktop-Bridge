@@ -112,33 +112,37 @@ def _find_transcript(session_id: str) -> Path:
 
 def _transcript_user_texts(path: Path) -> list[str]:
     texts: list[str] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        try:
-            record = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        message = record.get("message")
-        if isinstance(message, dict):
-            role = message.get("role")
-            content = message.get("content", [])
-        else:
-            role = record.get("role")
-            content = record.get("content", [])
-        if role != "user":
-            continue
-        if isinstance(content, str):
-            texts.append(content)
-            continue
-        if not isinstance(content, list):
-            continue
-        parts = [
-            item.get("text", "")
-            for item in content
-            if isinstance(item, dict) and item.get("type") in {"text", "input_text"}
-        ]
-        text = "".join(part for part in parts if isinstance(part, str))
-        if text:
-            texts.append(text)
+    with path.open(encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            message = record.get("message")
+            if isinstance(message, dict):
+                role = message.get("role")
+                content = message.get("content", [])
+            else:
+                role = record.get("role")
+                content = record.get("content", [])
+            if role != "user":
+                continue
+            if isinstance(content, str):
+                texts.append(content)
+                continue
+            if not isinstance(content, list):
+                continue
+            parts = [
+                item.get("text", "")
+                for item in content
+                if isinstance(item, dict) and item.get("type") in {"text", "input_text"}
+            ]
+            text = "".join(part for part in parts if isinstance(part, str))
+            if text:
+                texts.append(text)
     return texts
 
 
@@ -302,3 +306,19 @@ def build_rereview_prompt(resume: ReviewResume, task_prompt: str) -> str:
 当前文件 SHA-256：{current}
 本轮补充要求：{task_prompt.strip() or "无"}
 """
+
+
+__all__ = [
+    "REVIEW_IDENTITIES",
+    "DOC_REVIEW_IDENTITIES",
+    "ALL_REVIEW_IDENTITIES",
+    "ReviewResume",
+    "normalize_session_id",
+    "normalize_review_target",
+    "target_sha256",
+    "registry_path",
+    "bind_review_session",
+    "find_review_session",
+    "prepare_review_resume",
+    "build_rereview_prompt",
+]
