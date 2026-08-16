@@ -42,7 +42,7 @@ class DesktopServer:
     def base_url(self) -> str:
         suffix = "/api/v1/acp"
         if not self.acp_endpoint.endswith(suffix):
-            raise WorkBuddyError(f"Unexpected ACP endpoint: {self.acp_endpoint}")
+            raise WorkBuddyError(f"ACP 端点格式异常: {self.acp_endpoint}")
         return self.acp_endpoint[: -len(suffix)]
 
 

@@ -26,7 +26,7 @@ class IdentityTests(unittest.TestCase):
         self.assertEqual(normalize_identity("文档审查员"), "docs-reviewer")
 
     def test_rejects_unknown_identity(self) -> None:
-        with self.assertRaisesRegex(ValueError, "identity must be one of"):
+        with self.assertRaisesRegex(ValueError, "identity 必须是以下之一"):
             normalize_identity("reviewer")
 
     def test_composes_registered_identity_with_task_once(self) -> None:
@@ -45,7 +45,8 @@ class IdentityTests(unittest.TestCase):
             workbuddy_start("task", identity="reviewer"),
             {
                 "ok": False,
-                "error": "identity must be one of: online-search, S1, S2, S3, env-intel, docs-reviewer",
+                "错误码": "invalid_argument",
+                "error": "参数无效: identity 必须是以下之一: online-search, S1, S2, S3, env-intel, docs-reviewer",
             },
         )
 

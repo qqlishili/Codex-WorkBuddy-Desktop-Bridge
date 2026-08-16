@@ -18,6 +18,7 @@ from workbuddy_bridge.acp import (
     spawn_isolated_server,
     task_prompt,
 )
+from workbuddy_bridge.errors import ERROR_KEYS, err
 from workbuddy_bridge.history import register_completed_session, wait_for_task_registration
 from workbuddy_bridge.identities import compose_identity_prompt, normalize_identity
 from workbuddy_bridge.multiplexer import SessionEventChannel
@@ -151,7 +152,9 @@ def _dispatch_prompt(
         transport.thread.start()
         if not task.channel.wait_for_prompt_start(15.0):
             raise WorkBuddyError(
-                f"WorkBuddy did not accept prompt for session: {task.session_id}"
+                ERROR_KEYS["workbuddy_prompt_start_timeout"].format(
+                    session_id=task.session_id
+                )
             )
     return transport
 
@@ -279,15 +282,19 @@ def _run(task: TaskState, timeout_seconds: float) -> None:
                     break
         if not stop_reason:
             raise WorkBuddyError(
-                f"Timed out waiting for session_end: {task.session_id}"
+                ERROR_KEYS["workbuddy_session_timeout"].format(
+                    session_id=task.session_id
+                )
             )
         if stop_reason == "cancelled":
             task.state = "cancelled"
-            task.error = "WorkBuddy cancelled the prompt"
+            task.error = ERROR_KEYS["workbuddy_session_cancelled"]
             return
         if stop_reason != "end_turn":
             raise WorkBuddyError(
-                f"WorkBuddy session ended with stopReason={stop_reason}"
+                ERROR_KEYS["workbuddy_session_abnormal_end"].format(
+                    stop_reason=stop_reason
+                )
             )
 
         transport.done.wait(5.0)
@@ -389,9 +396,9 @@ def workbuddy_start(
     """Queue a task or optionally resume one bound S1/S2/S3 review session."""
     working_dir = Path(cwd or Path.cwd()).resolve()
     if not working_dir.is_dir():
-        return {"ok": False, "error": f"cwd is not a directory: {working_dir}"}
+        return err("invalid_cwd", path=str(working_dir))
     if not prompt.strip():
-        return {"ok": False, "error": "prompt must not be empty"}
+        return err("empty_prompt")
     try:
         canonical_identity = normalize_identity(identity)
         canonical_resume_session_id = (
@@ -415,7 +422,7 @@ def workbuddy_start(
                 canonical_review_target,
             )
     except ValueError as exc:
-        return {"ok": False, "error": str(exc)}
+        return err("invalid_argument", message=str(exc))
     if canonical_resume_session_id:
         if canonical_identity not in REVIEW_IDENTITIES:
             return {
@@ -492,7 +499,7 @@ def workbuddy_cancel(task_id: str) -> dict[str, Any]:
         return {"ok": False, "error": f"未知任务 ID: {task_id}"}
     client = task.client
     if not client or not task.session_id:
-        return {"ok": False, "state": task.state, "error": "Task is not cancellable right now"}
+        return err("task_not_cancellable")
     try:
         client.notify("session/cancel", {"sessionId": task.session_id})
         task.cancel_requested = True

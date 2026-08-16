@@ -206,7 +206,7 @@ def normalize_identity(identity: str) -> str:
     canonical = _IDENTITY_ALIASES.get(value.lower())
     if not canonical:
         choices = ", ".join(IDENTITIES)
-        raise ValueError(f"identity must be one of: {choices}")
+        raise ValueError(f"identity 必须是以下之一: {choices}")
     return canonical
 
 
