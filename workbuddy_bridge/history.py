@@ -14,6 +14,13 @@ DEFAULT_BUSY_TIMEOUT_MS = 5_000
 DEFAULT_REGISTRATION_WAIT_SECONDS = 5.0
 
 
+__all__ = [
+    "workbuddy_database_path",
+    "wait_for_task_registration",
+    "register_completed_session",
+]
+
+
 def workbuddy_database_path() -> Path:
     """Return the desktop history database used by the current WorkBuddy profile."""
     return config_dir() / "workbuddy.db"

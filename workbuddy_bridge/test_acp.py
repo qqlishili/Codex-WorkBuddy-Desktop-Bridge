@@ -11,9 +11,9 @@ from workbuddy_bridge.acp import (
     AcpClient,
     DesktopServer,
     _session_events,
-    _session_title,
     spawn_isolated_server,
 )
+from workbuddy_bridge.acp_utils import session_title
 
 
 class SessionTitleTests(unittest.TestCase):
@@ -29,7 +29,7 @@ class SessionTitleTests(unittest.TestCase):
             }
         ]
 
-        self.assertEqual(_session_title(events), "WorkBuddy generated title")
+        self.assertEqual(session_title(events), "WorkBuddy generated title")
 
     def test_ignores_non_title_updates(self) -> None:
         events = [
@@ -43,7 +43,7 @@ class SessionTitleTests(unittest.TestCase):
             }
         ]
 
-        self.assertEqual(_session_title(events), "")
+        self.assertEqual(session_title(events), "")
 
     def test_filters_broadcasts_by_session_id(self) -> None:
         events = [

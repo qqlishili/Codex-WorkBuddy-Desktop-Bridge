@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import socket
@@ -14,7 +15,23 @@ from typing import Any, Callable
 
 import httpx
 
+from workbuddy_bridge.acp_utils import message_text as _message_text_public, session_title as _session_title_public
 from workbuddy_bridge.config import config_dir as _config_dir
+
+
+__all__ = [
+    "REQUEST_HEADER",
+    "HOST_SESSION_PREFIX",
+    "DEFAULT_TIMEOUT_SECONDS",
+    "WorkBuddyError",
+    "task_prompt",
+    "DesktopServer",
+    "AcpClient",
+    "discover_desktop_server",
+    "spawn_isolated_server",
+    "kill_isolated_server",
+    "ask_desktop",
+]
 
 
 REQUEST_HEADER = {"x-codebuddy-request": "1"}
@@ -78,9 +95,18 @@ def _candidate_sidecars() -> list[tuple[Path, str, int]]:
             pid = int(payload["pid"])
             runtime_id = pid_file.parent.name
             pipe = rf"\\.\pipe\workbuddy-{runtime_id}-sidecar-control"
-            candidates.append((pid_file, pipe, pid))
         except (OSError, ValueError, KeyError, json.JSONDecodeError):
             continue
+        # 验证 PID 存活：os.kill(pid, 0) 不发信号只检查存在性
+        # PermissionError → 进程存在但无权限（仍算存活）
+        # ProcessLookupError (OSError errno 3) → 进程已死，跳过
+        try:
+            os.kill(pid, 0)
+        except PermissionError:
+            pass  # 进程存活，仅权限不足
+        except OSError:
+            continue  # 进程已死或其他 OS 错误，跳过
+        candidates.append((pid_file, pipe, pid))
     candidates.sort(key=lambda item: item[0].stat().st_mtime, reverse=True)
     return candidates
 
@@ -270,7 +296,7 @@ def _iter_sse_json(response: httpx.Response):
                 try:
                     yield json.loads(payload)
                 except json.JSONDecodeError:
-                    pass
+                    logging.debug("SSE: dropped non-JSON multiline payload: %r", payload)
             continue
         if line.startswith("data: "):
             data_lines.append(line[6:])
@@ -278,7 +304,7 @@ def _iter_sse_json(response: httpx.Response):
             try:
                 yield json.loads(line)
             except json.JSONDecodeError:
-                pass
+                logging.debug("SSE: dropped non-JSON line: %r", line)
     if data_lines:
         try:
             yield json.loads("".join(data_lines))
@@ -287,26 +313,17 @@ def _iter_sse_json(response: httpx.Response):
 
 
 def _message_text(update: dict[str, Any]) -> str:
-    params = update.get("params") or {}
-    body = params.get("update") if isinstance(params, dict) else None
-    if not isinstance(body, dict):
-        body = params if isinstance(params, dict) else {}
-    kind = str(body.get("sessionUpdate", body.get("type", ""))).lower()
-    if "agent_message" not in kind and kind not in {"assistant_message", "message_chunk"}:
-        return ""
-    content = body.get("content")
-    if isinstance(content, dict) and isinstance(content.get("text"), str):
-        return content["text"]
-    if isinstance(body.get("text"), str):
-        return body["text"]
-    return ""
+    """DEPRECATED: 改用 workbuddy_bridge.acp_utils.message_text。"""
+    from workbuddy_bridge.acp_utils import message_text
+
+    return message_text(update)
 
 
 def _event_session_id(event: dict[str, Any]) -> str:
-    params = event.get("params") or {}
-    if not isinstance(params, dict):
-        return ""
-    return str(params.get("sessionId") or params.get("session_id") or "")
+    """DEPRECATED: 改用 workbuddy_bridge.acp_utils.event_session_id。"""
+    from workbuddy_bridge.acp_utils import event_session_id
+
+    return event_session_id(event)
 
 
 def _session_events(
@@ -634,12 +651,12 @@ class AcpClient:
         )
         own_events = _session_events(events, target_session_id)
         answer = "".join(
-            filter(None, (_message_text(event) for event in own_events))
+            filter(None, (_message_text_public(event) for event in own_events))
         ).strip()
         return {
             "session_id": target_session_id,
             "answer": answer,
-            "title": _session_title(own_events),
+            "title": _session_title_public(own_events),
             "result": result,
             "events": own_events,
         }

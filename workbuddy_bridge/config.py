@@ -25,3 +25,6 @@ def config_dir() -> Path:
         or os.environ.get("CODEBUDDY_CONFIG_DIR")
         or Path.home() / ".workbuddy"
     ).expanduser().resolve()
+
+
+__all__ = ["config_dir"]

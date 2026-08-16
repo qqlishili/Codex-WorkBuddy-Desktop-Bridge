@@ -48,3 +48,6 @@ def err(key: str, **detail: Any) -> dict[str, Any]:
     elif detail:
         message = f"{message}（{', '.join(f'{k}={v}' for k, v in detail.items())}）"
     return {"ok": False, "错误码": key, "error": message}
+
+
+__all__ = ["ERROR_KEYS", "err"]

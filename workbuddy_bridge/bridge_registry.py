@@ -98,3 +98,6 @@ def list_bridge_sessions() -> dict[str, Any]:
     with _REGISTRY_LOCK:
         data = _load_registry_unlocked()
     return data["sessions"]
+
+
+__all__ = ["register_bridge_session", "list_bridge_sessions", "registry_path"]
