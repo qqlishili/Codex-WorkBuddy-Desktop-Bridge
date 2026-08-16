@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from workbuddy_bridge.config import config_dir
+
 REVIEW_IDENTITIES = frozenset({"S1", "S2", "S3"})
 DOC_REVIEW_IDENTITIES = frozenset({"docs-reviewer"})
 ALL_REVIEW_IDENTITIES = REVIEW_IDENTITIES | DOC_REVIEW_IDENTITIES
@@ -61,15 +63,7 @@ def target_sha256(target: str) -> str | None:
 
 
 def registry_path() -> Path:
-    return _config_dir() / REGISTRY_FILENAME
-
-
-def _config_dir() -> Path:
-    return Path(
-        os.environ.get("WORKBUDDY_CONFIG_DIR")
-        or os.environ.get("CODEBUDDY_CONFIG_DIR")
-        or Path.home() / ".workbuddy"
-    ).expanduser().resolve()
+    return config_dir() / REGISTRY_FILENAME
 
 
 def _load_registry_unlocked() -> dict[str, dict[str, Any]]:
@@ -101,7 +95,7 @@ def _write_registry_unlocked(sessions: dict[str, dict[str, Any]]) -> None:
 
 
 def _find_transcript(session_id: str) -> Path:
-    projects = _config_dir() / "projects"
+    projects = config_dir() / "projects"
     matches = [
         path
         for path in projects.glob(f"*/{session_id}.jsonl")

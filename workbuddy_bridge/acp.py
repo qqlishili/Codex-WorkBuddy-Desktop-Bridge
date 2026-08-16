@@ -14,6 +14,8 @@ from typing import Any, Callable
 
 import httpx
 
+from workbuddy_bridge.config import config_dir as _config_dir
+
 
 REQUEST_HEADER = {"x-codebuddy-request": "1"}
 HOST_SESSION_PREFIX = "__workbuddy_cli_host__"
@@ -189,11 +191,7 @@ def spawn_isolated_server(
         raise WorkBuddyError(f"WorkBuddy CLI entry was not found: {cli_path}")
     runtime_id = f"codex-worker-{uuid.uuid4().hex[:12]}"
     port = _free_local_port()
-    config_dir = Path(
-        os.environ.get("WORKBUDDY_CONFIG_DIR")
-        or os.environ.get("CODEBUDDY_CONFIG_DIR")
-        or Path.home() / ".workbuddy"
-    ).expanduser().resolve()
+    config_dir = _config_dir()
     params = {
         "sessionId": runtime_id,
         "command": str(executable),
@@ -541,8 +539,12 @@ class AcpClient:
     def notify(self, method: str, params: dict[str, Any]) -> None:
         """Send an ACP notification, which intentionally has no JSON-RPC result."""
         payload = {"jsonrpc": "2.0", "method": method, "params": params}
-        with httpx.Client(timeout=15.0, trust_env=False) as client:
-            client.post(self.server.acp_endpoint, headers=self._headers(), json=payload).raise_for_status()
+        self._http.post(
+            self.server.acp_endpoint,
+            headers=self._headers(),
+            json=payload,
+            timeout=15.0,
+        ).raise_for_status()
 
     def listen(
         self,
@@ -593,6 +595,8 @@ class AcpClient:
             "id": event["id"],
             "result": {"outcome": {"outcome": "selected", "optionId": allow}},
         }
+        # 新建 client 而非复用 self._http：此函数在 request() 的 SSE stream 迭代中被调用，
+        # 复用正在 stream 的 self._http 会导致同一 client 同时处理流和 post，产生冲突。
         with httpx.Client(timeout=10.0, trust_env=False) as client:
             client.post(self.server.acp_endpoint, headers=self._headers(), json=payload).raise_for_status()
 

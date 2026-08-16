@@ -7,6 +7,7 @@ from contextlib import closing
 from pathlib import Path
 
 from workbuddy_bridge.acp import WorkBuddyError
+from workbuddy_bridge.config import config_dir
 
 
 DEFAULT_BUSY_TIMEOUT_MS = 5_000
@@ -15,12 +16,7 @@ DEFAULT_REGISTRATION_WAIT_SECONDS = 5.0
 
 def workbuddy_database_path() -> Path:
     """Return the desktop history database used by the current WorkBuddy profile."""
-    config_dir = os.environ.get("WORKBUDDY_CONFIG_DIR") or os.environ.get(
-        "CODEBUDDY_CONFIG_DIR"
-    )
-    if config_dir:
-        return Path(config_dir).expanduser().resolve() / "workbuddy.db"
-    return Path.home() / ".workbuddy" / "workbuddy.db"
+    return config_dir() / "workbuddy.db"
 
 
 def _current_user_id(connection: sqlite3.Connection) -> str:
@@ -69,7 +65,11 @@ def register_completed_session(
     database_path: str | Path | None = None,
     timestamp_ms: int | None = None,
 ) -> Path:
-    """Add an ACP transcript to WorkBuddy's task history without activating its window."""
+    """Add an ACP transcript to WorkBuddy's task history without activating its window.
+
+    DEPRECATED: 改用 bridge_registry.register_bridge_session 解耦 WorkBuddy SQLite schema。
+    保留此函数仅为向后兼容；新代码应调用 register_bridge_session。
+    """
     db_path = Path(database_path) if database_path else workbuddy_database_path()
     if not db_path.is_file():
         raise WorkBuddyError(f"WorkBuddy history database was not found: {db_path}")
