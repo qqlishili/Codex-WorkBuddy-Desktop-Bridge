@@ -151,8 +151,8 @@ def event_to_activity(
     tool = _tool_name(update)
     normalized_tool = tool.replace("-", "").replace("_", "").casefold()
     if not raw and kind in {"", "other"}:
-        # WorkBuddy commonly emits an initial placeholder and then a second,
-        # detailed tool_call for the same call ID. Log only the detailed one.
+        # WorkBuddy 通常先发一个初始占位符，再对同一 call ID 发第二个详细 tool_call。
+        # 只记录详细的那个。
         return None
 
     activity = "正在执行工具"

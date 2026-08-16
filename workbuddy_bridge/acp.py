@@ -295,7 +295,7 @@ def _iter_sse_json(response: httpx.Response):
                 try:
                     yield json.loads(payload)
                 except json.JSONDecodeError:
-                    logging.debug("SSE: dropped non-JSON multiline payload: %r", payload)
+                    logging.warning("SSE: dropped non-JSON multiline payload: %r", payload)
             continue
         if line.startswith("data: "):
             data_lines.append(line[6:])
@@ -303,7 +303,7 @@ def _iter_sse_json(response: httpx.Response):
             try:
                 yield json.loads(line)
             except json.JSONDecodeError:
-                logging.debug("SSE: dropped non-JSON line: %r", line)
+                logging.warning("SSE: dropped non-JSON line: %r", line)
     if data_lines:
         try:
             yield json.loads("".join(data_lines))
@@ -419,9 +419,9 @@ class AcpClient:
             self.connection_id = str(initialized["connectionId"])
 
     def new_session(self, cwd: str, *, as_task: bool = True) -> str:
-        # WorkBuddy's own TaskStarter creates top-level Tasks as a playground
-        # session with an empty backend cwd. The original project cwd remains
-        # bridge-side context and callers should use absolute paths in prompts.
+        # WorkBuddy 自己的 TaskStarter 把顶层 Task 创建为 playground session，
+        # 其 backend cwd 为空。原始项目 cwd 保留为桥接器侧的上下文，
+        # 调用方应在 prompt 中使用绝对路径。
         self.is_playground = as_task
         result = self.request(
             "session/new",
