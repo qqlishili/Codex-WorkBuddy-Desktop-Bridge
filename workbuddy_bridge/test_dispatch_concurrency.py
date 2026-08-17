@@ -90,5 +90,54 @@ class DispatchPromptConcurrencyTests(unittest.TestCase):
         self.assertEqual(results[1], "ok", f"task2 result: {results[1]}")
 
 
+class GcTasksTests(unittest.TestCase):
+    """验证 _gc_tasks 的驱逐边界：不误杀长任务，正确清理超龄泄漏。"""
+
+    def tearDown(self) -> None:
+        from workbuddy_bridge.server import TASKS, TASKS_LOCK
+
+        with TASKS_LOCK:
+            TASKS.clear()
+
+    def test_does_not_evict_long_running_task(self) -> None:
+        """timeout_seconds=7200 的 active 任务运行 1 小时（3600s），不应被驱逐（P1-6 回归）。"""
+        from workbuddy_bridge.server import (
+            TASKS,
+            TASKS_LOCK,
+            TASK_ACTIVE_TIMEOUT_SECONDS,
+            _gc_tasks,
+        )
+
+        task = TaskState(task_id="long", prompt="p", cwd=".", timeout_seconds=7200.0)
+        task.state = "running"
+        task.created_at = time.time() - TASK_ACTIVE_TIMEOUT_SECONDS  # 运行恰好 3600s
+        with TASKS_LOCK:
+            TASKS["long"] = task
+        _gc_tasks()
+        with TASKS_LOCK:
+            self.assertIn("long", TASKS, "长任务不应被 3600s 兜底误杀")
+
+    def test_evicts_stale_active_task(self) -> None:
+        """timeout_seconds=300 的 active 任务超龄（>3600+600），应被驱逐。"""
+        from workbuddy_bridge.server import (
+            TASKS,
+            TASKS_LOCK,
+            TASK_ACTIVE_GRACE_SECONDS,
+            TASK_ACTIVE_TIMEOUT_SECONDS,
+            _gc_tasks,
+        )
+
+        task = TaskState(task_id="stale", prompt="p", cwd=".", timeout_seconds=300.0)
+        task.state = "running"
+        task.created_at = time.time() - (
+            TASK_ACTIVE_TIMEOUT_SECONDS + TASK_ACTIVE_GRACE_SECONDS + 1
+        )
+        with TASKS_LOCK:
+            TASKS["stale"] = task
+        _gc_tasks()
+        with TASKS_LOCK:
+            self.assertNotIn("stale", TASKS, "超龄 active 任务应被清理")
+
+
 if __name__ == "__main__":
     unittest.main()

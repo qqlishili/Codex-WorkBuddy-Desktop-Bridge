@@ -78,6 +78,7 @@ class TaskState:
     resume_session_id: str = ""
     review_target: str = ""
     resume_review: bool = False
+    timeout_seconds: float = 3600.0  # 任务声明的最长存活（秒）；_gc_tasks 驱逐阈值据此而非写死
     resumed: bool = False
     previous_sha256: str | None = None
     current_sha256: str | None = None
@@ -102,6 +103,7 @@ class TaskState:
 TASKS: dict[str, TaskState] = {}
 TASKS_MAX_KEEP = 64  # 保留最近 N 个 terminal state task；超出部分清理
 TASK_ACTIVE_TIMEOUT_SECONDS = 3600  # active task 最长存活；超龄标记 failed 并清理
+TASK_ACTIVE_GRACE_SECONDS = 600  # active 驱逐宽裕量：任务 timeout 上限 + 宽裕才视为泄漏
 MAX_CONCURRENT_TASKS = 4  # workbuddy_status 报告的最大并发任务数；未来可改运行时探测（需 WorkBuddy API 支持）
 TASKS_LOCK = threading.Lock()
 PROMPT_DISPATCH_INTERVAL_SECONDS = 1.0
@@ -238,7 +240,8 @@ def _gc_tasks() -> int:
             tid
             for tid, t in TASKS.items()
             if t.state in active_states
-            and now - t.created_at > TASK_ACTIVE_TIMEOUT_SECONDS
+            and now - t.created_at
+            > max(TASK_ACTIVE_TIMEOUT_SECONDS, t.timeout_seconds + TASK_ACTIVE_GRACE_SECONDS)
         ]
         for tid in stale_active:
             t = TASKS[tid]
@@ -480,7 +483,7 @@ def workbuddy_start(
             else ""
         )
         if resume_review and canonical_identity not in REVIEW_IDENTITIES:
-            raise ValueError(f"resume_review 只能与 {', '.join(sorted(ALL_REVIEW_IDENTITIES))} 审查身份一起使用")
+            raise ValueError(f"resume_review 只能与 {', '.join(sorted(REVIEW_IDENTITIES))} 审查身份一起使用")
         if resume_review and not canonical_resume_session_id:
             if not canonical_review_target:
                 raise ValueError("自动复审时必须提供 review_target（caller 未传入）")
@@ -504,7 +507,7 @@ def workbuddy_start(
             "审查目标身份不支持",
             identities=", ".join(sorted(ALL_REVIEW_IDENTITIES)),
         )
-    if canonical_identity == "docs-reviewer" and not canonical_review_target.strip():
+    if canonical_identity in DOC_REVIEW_IDENTITIES and not canonical_review_target.strip():
         return err("缺少审查目标")
     task_id = f"wb-{uuid.uuid4().hex[:12]}"
     task = TaskState(
@@ -520,6 +523,7 @@ def workbuddy_start(
             canonical_resume_session_id
             and canonical_identity in REVIEW_IDENTITIES
         ),
+        timeout_seconds=float(timeout_seconds),
     )
     with TASKS_LOCK:
         TASKS[task_id] = task
