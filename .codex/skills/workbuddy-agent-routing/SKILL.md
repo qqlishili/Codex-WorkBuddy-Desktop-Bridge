@@ -31,7 +31,20 @@ workbuddy_start(
 
 For a first S1/S2/S3 review, also pass `review_target=<absolute reviewed file or directory>`. This binds the returned WorkBuddy session to that identity, working directory, and target.
 
-Then call `workbuddy_wait` in intervals of at most 55 seconds until the task reaches a terminal state or 300 seconds have elapsed since dispatch. If the task is still non-terminal at that point, cancel it and report the timeout; do not launch another execution route.
+Then poll to completion with an explicit loop. A single `workbuddy_wait` returns the CURRENT state, not the final result — if `state` is not terminal, you MUST call `workbuddy_wait` again:
+
+```text
+deadline = now + timeout_seconds        # timeout_seconds passed to workbuddy_start (default 300)
+while now < deadline:
+    r = workbuddy_wait(task_id, timeout_seconds=55)   # blocks up to 55s
+    if r.state in {"completed", "failed", "cancelled", "cancelling"}:
+        break                            # terminal -> use r.answer / r.result
+    # r.state is queued/connecting/running/observing -> still running, loop again
+
+if r.state not in {"completed", "failed", "cancelled"}:
+    workbuddy_cancel(task_id)
+    report the timeout; do not launch another execution route
+```
 
 - The bridge creates native WorkBuddy `working` tasks. Leave task titles to WorkBuddy's own automatic naming; never send or write a custom title.
 - The bridge injects the registered identity instructions. Never include those instructions in `prompt`, even when the same identity is called repeatedly.
