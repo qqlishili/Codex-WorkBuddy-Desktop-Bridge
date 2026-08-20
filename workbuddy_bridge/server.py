@@ -456,7 +456,7 @@ def workbuddy_status(task_id: str = "") -> dict[str, Any]:
 def workbuddy_start(
     prompt: str,
     cwd: str = "",
-    timeout_seconds: int = 300,
+    timeout_seconds: int = 600,
     model: str = "",
     reasoning_effort: str = "",
     identity: str = "",
