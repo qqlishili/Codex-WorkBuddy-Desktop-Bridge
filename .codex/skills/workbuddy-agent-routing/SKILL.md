@@ -25,7 +25,7 @@ workbuddy_start(
   cwd=<working directory>,
   model="deepseek-v4-flash",
   reasoning_effort="low",
-  timeout_seconds=300
+  timeout_seconds=600
 )
 ```
 
@@ -66,7 +66,7 @@ workbuddy_start(
   resume_review=true,
   model="deepseek-v4-flash",
   reasoning_effort="low",
-  timeout_seconds=300
+  timeout_seconds=600
 )
 ```
 
